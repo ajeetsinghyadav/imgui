@@ -16,67 +16,39 @@ set(IMGUI_SOURCES
     imgui_draw.cpp
     imgui_tables.cpp
     imgui_widgets.cpp
+    imgui_demo.cpp
 )
 
-# Optional demo file (can be excluded for smaller builds)
-option(IMGUI_BUILD_DEMO "Build ImGui demo code" ON)
-if(IMGUI_BUILD_DEMO)
-    list(APPEND IMGUI_SOURCES imgui_demo.cpp)
+if(VNE_ENABLE_OPENGL OR VNE_ENABLE_OPENGLES)
+    list(APPEND IMGUI_SOURCES backends/imgui_impl_opengl3.cpp)
+endif()
+
+if(VNE_ENABLE_METAL)
+    list(APPEND IMGUI_SOURCES backends/imgui_impl_metal.mm)
+endif()
+
+if(VNE_ENABLE_VULKAN)
+    list(APPEND IMGUI_SOURCES backends/imgui_impl_vulkan.cpp)
 endif()
 
 # Create ImGui library
 add_library(imgui STATIC ${IMGUI_SOURCES})
 
-# Set include directories
+# Set include directories for the library
 target_include_directories(imgui
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<INSTALL_INTERFACE:include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/backends>
+        $<INSTALL_INTERFACE:include/backends>
 )
-
-# Platform-specific backend sources
-set(IMGUI_BACKEND_SOURCES "")
-
-# OpenGL3 backend (for OpenGL and OpenGL ES)
-if(VNE_ENABLE_OPENGL OR VNE_ENABLE_OPENGLES)
-    list(APPEND IMGUI_BACKEND_SOURCES
-        backends/imgui_impl_opengl3.cpp
-    )
-    target_compile_definitions(imgui PUBLIC IMGUI_IMPL_OPENGL_LOADER_CUSTOM)
-endif()
-
-# Metal backend (for macOS, iOS, visionOS)
-if(VNE_ENABLE_METAL)
-    if(APPLE)
-        list(APPEND IMGUI_BACKEND_SOURCES
-            backends/imgui_impl_metal.mm
-        )
-    endif()
-endif()
-
-# Vulkan backend
-if(VNE_ENABLE_VULKAN)
-    list(APPEND IMGUI_BACKEND_SOURCES
-        backends/imgui_impl_vulkan.cpp
-    )
-endif()
-
-# GLFW platform backend (for desktop platforms)
-if(BUILD_GLFW AND (VNE_TARGET_PLATFORM IN_LIST DESKTOP_PLATFORMS))
-    list(APPEND IMGUI_BACKEND_SOURCES
-        backends/imgui_impl_glfw.cpp
-    )
-endif()
-
-# Add backend sources to library if any
-if(IMGUI_BACKEND_SOURCES)
-    target_sources(imgui PRIVATE ${IMGUI_BACKEND_SOURCES})
-endif()
 
 # Link required libraries based on backends
 if(VNE_ENABLE_OPENGL OR VNE_ENABLE_OPENGLES)
-    # OpenGL is handled via GLAD or system loader
-    # No explicit linking needed as ImGui uses function pointers
+    find_package(OpenGL)
+    if(OpenGL_FOUND)
+        target_link_libraries(imgui PRIVATE OpenGL::GL)
+    endif()
 endif()
 
 if(VNE_ENABLE_METAL AND APPLE)
@@ -85,27 +57,20 @@ if(VNE_ENABLE_METAL AND APPLE)
     if(METAL_FRAMEWORK AND QUARTZCORE_FRAMEWORK)
         target_link_libraries(imgui PRIVATE ${METAL_FRAMEWORK} ${QUARTZCORE_FRAMEWORK})
     endif()
-endif()
-
-if(VNE_ENABLE_VULKAN)
-    # Vulkan is header-only, no linking needed
-endif()
-
-if(BUILD_GLFW AND (VNE_TARGET_PLATFORM IN_LIST DESKTOP_PLATFORMS))
-    if(TARGET glfw)
-        target_link_libraries(imgui PRIVATE glfw)
-    endif()
+    # Enable ARC for Metal backend file to fix bridge cast warnings
+    set_source_files_properties(backends/imgui_impl_metal.mm PROPERTIES
+        COMPILE_FLAGS "-fobjc-arc"
+    )
 endif()
 
 # Compiler-specific options
 if(MSVC)
     target_compile_options(imgui PRIVATE /W4)
-    # Disable specific warnings for ImGui
     target_compile_definitions(imgui PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
     target_compile_options(imgui PRIVATE -Wall -Wextra)
-    # Disable specific warnings for ImGui
     target_compile_options(imgui PRIVATE -Wno-unused-parameter -Wno-unused-variable)
+    target_compile_options(imgui PRIVATE -Wno-arc-bridge-casts-disallowed-in-nonarc)
 endif()
 
 # Set C++ standard
